@@ -155,7 +155,7 @@ the same color.
 This effect scales the internal buffer. This has a few uses:
 
 * Use `--effect-scale` in combination with `--scaling` to create a zoom effect:
-  `--efect-scale 1.1 --scaling center`
+  `--effect-scale 1.1 --scaling center`
 * Speed up other effects by making the resolution smaller: with
   `--effect-scale 0.5 --effect-blur 7x5 --effect-scale 2`, swaylock-effect needs to blur
   only 1/4 as many pixels.
