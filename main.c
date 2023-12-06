@@ -29,6 +29,7 @@
 #include "wlr-layer-shell-unstable-v1-client-protocol.h"
 #include "wlr-screencopy-unstable-v1-client-protocol.h"
 #include "ext-session-lock-v1-client-protocol.h"
+#include "fingerprint/fingerprint.h"
 
 // returns a positive integer in milliseconds
 static uint32_t parse_seconds(const char *seconds) {
@@ -997,6 +998,7 @@ static int parse_options(int argc, char **argv, struct swaylock_state *state,
 		{"disable-caps-lock-text", no_argument, NULL, 'L'},
 		{"indicator-caps-lock", no_argument, NULL, 'l'},
 		{"line-uses-inside", no_argument, NULL, 'n'},
+		{"fingerprint", no_argument, NULL, 'p'},
 		{"line-uses-ring", no_argument, NULL, 'r'},
 		{"scaling", required_argument, NULL, 's'},
 		{"tiling", no_argument, NULL, 'T'},
@@ -1106,6 +1108,8 @@ static int parse_options(int argc, char **argv, struct swaylock_state *state,
 			"Disable the Caps Lock text.\n"
 		"  -l, --indicator-caps-lock        "
 			"Show the current Caps Lock state also on the indicator.\n"
+		"  -p, --fingerprint                "
+			"Enable fingerprint scanning. Fprint is required.\n"
 		"  -s, --scaling <mode>             "
 			"Image scaling mode: stretch, fill, fit, center, tile, solid_color.\n"
 		"  -T, --tiling                     "
@@ -1227,7 +1231,7 @@ static int parse_options(int argc, char **argv, struct swaylock_state *state,
 	optind = 1;
 	while (1) {
 		int opt_idx = 0;
-		c = getopt_long(argc, argv, "c:deFfhi:SkKLlnrs:tuvC:", long_options,
+		c = getopt_long(argc, argv, "c:deFfhi:SkKLlnprs:tuvC:", long_options,
 				&opt_idx);
 		if (c == -1) {
 			break;
@@ -1272,6 +1276,11 @@ static int parse_options(int argc, char **argv, struct swaylock_state *state,
 		case 'S':
 			if (state) {
 				state->args.screenshots = true;
+			}
+			break;
+		case 'p':
+			if (state) {
+				state->args.fingerprint = true;
 			}
 			break;
 		case 'k':
@@ -1785,6 +1794,15 @@ static void term_in(int fd, short mask, void *data) {
 	state.run_display = false;
 }
 
+static void check_fingerprint(void *d) {
+	struct FingerprintState *fingerprint_state = d;
+	if (fingerprint_verify(fingerprint_state)) {
+		state.run_display = false;
+	}
+
+	loop_add_timer(state.eventloop, 300, check_fingerprint, fingerprint_state);
+}
+
 // Check for --debug 'early' we also apply the correct loglevel
 // to the forked child, without having to first proces all of the
 // configuration (including from file) before forking and (in the
@@ -1847,6 +1865,7 @@ int main(int argc, char **argv) {
 		.datestr = strdup("%a, %x"),
 		.allow_fade = true,
 		.password_grace_period = 0,
+		.fingerprint = false,
 
 		.text_cleared = strdup("Cleared"),
 		.text_caps_lock = strdup("Caps Lock"),
@@ -2011,6 +2030,12 @@ int main(int argc, char **argv) {
 
 	loop_add_timer(state.eventloop, 1000, timer_render, &state);
 
+	struct FingerprintState fingerprint_state;
+	if (state.args.fingerprint) {
+		fingerprint_init(&fingerprint_state, &state);
+		loop_add_timer(state.eventloop, 100, check_fingerprint, &fingerprint_state);
+	}
+
 	if (state.args.fade_in) {
 		loop_add_timer(state.eventloop, state.args.fade_in, end_allow_fade_period, &state);
 	}
@@ -2045,6 +2070,9 @@ int main(int argc, char **argv) {
 		wl_display_roundtrip(state.display);
 	}
 
+	if(state.args.fingerprint) {
+		fingerprint_deinit(&fingerprint_state);
+	}
 	free(state.args.font);
 	return 0;
 }
