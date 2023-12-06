@@ -91,9 +91,9 @@ conf_data = configuration_data()
 conf_data.set_quoted('SYSCONFDIR', get_option('prefix') / get_option('sysconfdir'))
 conf_data.set_quoted('SWAYLOCK_VERSION', version)
 conf_data.set10('HAVE_GDK_PIXBUF', gdk_pixbuf.found())
+conf_data.set10('HAVE_FINGERPRINT', get_option('fingerprint').enabled())
 
 subdir('include')
-subdir('fingerprint')
 
 dependencies = [
 	cairo,
@@ -103,8 +103,7 @@ dependencies = [
 	dl,
 	xkbcommon,
 	wayland_client,
-	omp,
-	fingerprint
+	omp
 ]
 
 sources = [
@@ -123,6 +122,11 @@ sources = [
 	'effects.c',
 	'fade.c',
 ]
+
+if get_option('fingerprint').enabled()
+	subdir('fingerprint')
+	dependencies += [fingerprint]
+endif
 
 if libpam.found()
 	sources += ['pam.c']
