@@ -512,6 +512,11 @@ static char *effect_custom_compile(const char *path) {
 
 	// Find the true, absolute path of the input file
 	char *abspath = realpath(path, NULL);
+	if (abspath == NULL) {
+		swaylock_log(LOG_ERROR, "Custom effect: failed to resolve path '%s': %s",
+				path, strerror(errno));
+		return NULL;
+	}
 	size_t abspathlen = strlen(abspath);
 
 	char *outpath = malloc(cachelen + 1 + abspathlen + 3 + 1);
