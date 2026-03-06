@@ -10,6 +10,29 @@ is a fork of [mortie/swaylock-effects](https://github.com/mortie/swaylock-effect
 via [jirutka/swaylock-effects](https://github.com/jirutka/swaylock-effects),
 both of which are now unmaintained.
 
+## Security fixes in this fork
+
+The following bugs were found and fixed during a code audit of the inherited
+codebase:
+
+- **`pam.c`: shadowed `pam_status` variable** — the inner loop redeclared
+  `pam_status`, shadowing the outer variable. As a result, `pam_end()` and the
+  final `exit()` always received `PAM_SUCCESS` regardless of the actual
+  authentication result.
+- **`loop.c`: unsafe `realloc()` in `loop_add_fd()`** — assigning `realloc()`
+  directly to `loop->fds` meant a failed allocation would set `loop->fds` to
+  NULL while leaking the old allocation, followed immediately by a NULL
+  dereference write.
+- **`cairo.c`: unchecked `malloc()` in `cairo_surface_duplicate()`** — the
+  result was passed directly to `memcpy()` without a NULL check.
+- **`effects.c`: unchecked `malloc()` in `effect_blur()`** — the scratch buffer
+  was passed directly to `blur_once()` without a NULL check.
+- **`effects.c`: `--effect-custom` removed** — this feature compiled and loaded
+  user-supplied C files as lock screen effects at runtime, invoking `cc(1)` from
+  within the lock screen process. It had no known users and has been removed
+  along with `--time-effects`.
+
+
 ![Screenshot](https://raw.githubusercontent.com/hboetes/swaylock-effects/master/screenshot.png)
 
 ## Example Command
