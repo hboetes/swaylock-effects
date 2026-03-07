@@ -863,6 +863,7 @@ static char *choose_random_image(const char *directory) {
 			if (i == selected_file) {
 				char *path = malloc(strlen(path_buffer)+1);
 				strcpy(path, path_buffer);
+				closedir(dir);
 				return path;
 			}
 			++i;
