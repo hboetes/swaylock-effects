@@ -123,7 +123,7 @@ static void verify_result(GObject *object, const char *result, gboolean done, vo
 
 	if (g_str_equal(result, "verify-disconnected") ||
 	    g_str_equal(result, "verify-unknown-error")) {
-		swaylock_log(LOG_INFO, "Fingerprint device error/disconnect (%s), deactivating", result);
+		swaylock_log(LOG_INFO, "Fingerprint device error/disconnect (%s), will retry", result);
 		GError *err = NULL;
 		fprint_dbus_device_call_verify_stop_sync(state->device, NULL, &err);
 		if (err) {
@@ -135,8 +135,7 @@ static void verify_result(GObject *object, const char *result, gboolean done, vo
 		g_clear_object(&state->device);
 		state->started = FALSE;
 		state->completed = FALSE;
-		state->active = 0;
-		display_message(state, "Press ESC to retry fingerprint");
+		display_message(state, "Fingerprint: reconnecting...");
 		return;
 	}
 
