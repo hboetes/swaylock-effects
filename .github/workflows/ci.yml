@@ -4,7 +4,7 @@ on:
   - pull_request
 
 jobs:
-  build:
+  build-alpine:
     name: Build on Alpine ${{ matrix.arch }}
     runs-on: ubuntu-latest
     strategy:
@@ -17,7 +17,7 @@ jobs:
           - riscv64
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v1
+        uses: actions/checkout@v4
 
       - name: Install latest Alpine Linux for ${{ matrix.arch }}
         uses: jirutka/setup-alpine@v1
@@ -39,3 +39,54 @@ jobs:
           meson -Dgdk-pixbuf=disabled . output
           meson compile -C output --verbose
         shell: alpine.sh {0}
+
+  build-fedora:
+    name: Build on Fedora
+    runs-on: ubuntu-latest
+    container:
+      image: fedora:latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          dnf install -y \
+            gcc \
+            cairo-devel \
+            libxkbcommon-devel \
+            pam-devel \
+            meson \
+            scdoc \
+            wayland-devel \
+            wayland-protocols-devel \
+            gdk-pixbuf2-devel
+
+      - name: Build
+        run: |
+          meson . output
+          meson compile -C output --verbose
+
+  build-freebsd:
+    name: Build on FreeBSD
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Build on FreeBSD
+        uses: vmactions/freebsd-vm@v1
+        with:
+          usesh: true
+          prepare: |
+            pkg install -y \
+              cairo \
+              libxkbcommon \
+              meson \
+              scdoc \
+              wayland \
+              wayland-protocols \
+              gdk-pixbuf2
+          run: |
+            meson . output
+            meson compile -C output --verbose
