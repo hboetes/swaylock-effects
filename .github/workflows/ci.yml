@@ -64,7 +64,7 @@ jobs:
 
       - name: Build
         run: |
-          meson . output
+          meson setup . output
           meson compile -C output --verbose
 
   build-freebsd:
@@ -89,5 +89,5 @@ jobs:
               wayland-protocols \
               gdk-pixbuf2
           run: |
-            meson . output
+            meson setup . output
             meson compile -C output --verbose
