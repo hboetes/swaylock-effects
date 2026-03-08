@@ -120,8 +120,8 @@ _\*\*Optional: required for background images other than PNG_
 Run these commands:
 
     meson setup build
-    ninja -C build
-    sudo ninja -C build install
+    meson compile -C build
+    sudo meson install -C build
 
 Check `meson_options.txt` for build options. So for example, if you want to build with fingerprint support, use `meson setup build -Dfingerprint=enabled`
 
@@ -185,7 +185,7 @@ Base and factor should be between 0 and 1.
     * Default: The size of the image file.
 * `<gravity>`: Optional. Determine which point of the image is placed at `<position>`.
     * Possible values: `center`, `north`, `south`, `west`, `east`,
-      `northwest`, `northeast`, southwest`, `southeast`.
+      `northwest`, `northeast`, `southwest`, `southeast`.
     * With a `<gravity>` of `northwest`, `<position>` gives the location of the top/left
       corner of the image; with `southeast`, `<position>` controls the bottom/right corner,
       `center` controls the middle of the image, etc.
@@ -228,6 +228,6 @@ swaylock \
     --line-color 00000000 \
     --ring-color bb00cc \
     --separator-color 00000000 \
-    --image /home/han/Wallpapers/lockscreen \
+    --image $HOME/Wallpapers/lockscreen \
     --grace $grace
 ```
