@@ -134,9 +134,6 @@ void loop_add_fd(struct loop *loop, int fd, short mask,
 		swaylock_log(LOG_ERROR, "Unable to allocate memory for event");
 		return;
 	}
-	event->callback = callback;
-	event->data = data;
-	wl_list_insert(loop->fd_events.prev, &event->link);
 
 	struct pollfd pfd = {fd, mask, 0};
 
@@ -146,11 +143,15 @@ void loop_add_fd(struct loop *loop, int fd, short mask,
 				sizeof(struct pollfd) * loop->fd_capacity);
 		if (!fds) {
 			swaylock_log(LOG_ERROR, "Unable to realloc fds");
+			free(event);
 			return;
 		}
 		loop->fds = fds;
 	}
 
+	event->callback = callback;
+	event->data = data;
+	wl_list_insert(loop->fd_events.prev, &event->link);
 	loop->fds[loop->fd_length++] = pfd;
 }
 
