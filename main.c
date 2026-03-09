@@ -800,13 +800,16 @@ static cairo_surface_t *select_image(struct swaylock_state *state,
 
 static char *join_args(char **argv, int argc) {
 	assert(argc > 0);
-	int len = 0, i;
-	for (i = 0; i < argc; ++i) {
+	size_t len = 0;
+	for (int i = 0; i < argc; ++i) {
 		len += strlen(argv[i]) + 1;
 	}
 	char *res = malloc(len);
+	if (res == NULL) {
+		return NULL;
+	}
 	len = 0;
-	for (i = 0; i < argc; ++i) {
+	for (int i = 0; i < argc; ++i) {
 		strcpy(res + len, argv[i]);
 		len += strlen(argv[i]);
 		res[len++] = ' ';
@@ -861,8 +864,7 @@ static char *choose_random_image(const char *directory) {
 				continue;
 			}
 			if (i == selected_file) {
-				char *path = malloc(strlen(path_buffer)+1);
-				strcpy(path, path_buffer);
+				char *path = strdup(path_buffer);
 				closedir(dir);
 				return path;
 			}
@@ -876,17 +878,28 @@ static char *choose_random_image(const char *directory) {
 static void load_image(char *arg, struct swaylock_state *state) {
 	// [[<output>]:]<path>
 	struct swaylock_image *image = calloc(1, sizeof(struct swaylock_image));
+	if (image == NULL) {
+		swaylock_log(LOG_ERROR, "Failed to allocate image configuration");
+		return;
+	}
+
 	char *separator = strchr(arg, ':');
 	if (separator) {
 		*separator = '\0';
 		image->output_name = separator == arg ? NULL : strdup(arg);
+		*separator = ':';
 		image->path = strdup(separator + 1);
 	} else {
-		image->output_name = NULL;
 		image->path = strdup(arg);
 	}
 
+	if ((separator != NULL && separator != arg && image->output_name == NULL) || image->path == NULL) {
+		swaylock_log(LOG_ERROR, "Failed to allocate image path");
+		goto error;
+	}
+
 	struct swaylock_image *iter_image, *temp;
+	struct swaylock_image *replaced_image = NULL;
 	wl_list_for_each_safe(iter_image, temp, &state->images, link) {
 		if (lenient_strcmp(iter_image->output_name, image->output_name) == 0) {
 			if (image->output_name) {
@@ -897,11 +910,7 @@ static void load_image(char *arg, struct swaylock_state *state) {
 				swaylock_log(LOG_DEBUG, "Replacing default image with %s",
 						image->path);
 			}
-			wl_list_remove(&iter_image->link);
-			cairo_surface_destroy(iter_image->cairo_surface);
-			free(iter_image->output_name);
-			free(iter_image->path);
-			free(iter_image);
+			replaced_image = iter_image;
 			break;
 		}
 	}
@@ -911,19 +920,35 @@ static void load_image(char *arg, struct swaylock_state *state) {
 	// expansions performed
 	wordexp_t p;
 	while (strstr(image->path, "  ")) {
-		image->path = realloc(image->path, strlen(image->path) + 2);
+		char *path = realloc(image->path, strlen(image->path) + 2);
+		if (path == NULL) {
+			swaylock_log(LOG_ERROR, "Failed to expand image path");
+			goto error;
+		}
+		image->path = path;
 		char *ptr = strstr(image->path, "  ") + 1;
 		memmove(ptr + 1, ptr, strlen(ptr) + 1);
 		*ptr = '\\';
 	}
 	if (wordexp(image->path, &p, 0) == 0) {
-		free(image->path);
-		image->path = join_args(p.we_wordv, p.we_wordc);
+		bool have_words = p.we_wordc > 0;
+		char *path = NULL;
+		if (have_words) {
+			path = join_args(p.we_wordv, p.we_wordc);
+		}
 		wordfree(&p);
+		if (have_words) {
+			if (path == NULL) {
+				swaylock_log(LOG_ERROR, "Failed to expand image path");
+				goto error;
+			}
+			free(image->path);
+			image->path = path;
+		}
 	}
 
 	// If path is pointing to a directory, choose random image from it.
-	char* path = choose_random_image(image->path);
+	char *path = choose_random_image(image->path);
 	if (path != NULL) {
 		free(image->path);
 		image->path = path;
@@ -932,13 +957,26 @@ static void load_image(char *arg, struct swaylock_state *state) {
 	// Load the actual image
 	image->cairo_surface = load_background_image(image->path);
 	if (!image->cairo_surface) {
-		free(image);
-		return;
+		goto error;
+	}
+
+	if (replaced_image != NULL) {
+		wl_list_remove(&replaced_image->link);
+		cairo_surface_destroy(replaced_image->cairo_surface);
+		free(replaced_image->output_name);
+		free(replaced_image->path);
+		free(replaced_image);
 	}
 
 	wl_list_insert(&state->images, &image->link);
 	swaylock_log(LOG_DEBUG, "Loaded image %s for output %s", image->path,
 			image->output_name ? image->output_name : "*");
+	return;
+
+error:
+	free(image->output_name);
+	free(image->path);
+	free(image);
 }
 
 static void set_default_colors(struct swaylock_colors *colors) {
