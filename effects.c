@@ -222,6 +222,7 @@ static void effect_blur(uint32_t *dest, uint32_t *src, int width, int height, in
 	uint32_t *scratch = malloc(width * height * sizeof(*scratch));
 	if (!scratch) {
 		swaylock_log(LOG_ERROR, "Unable to allocate memory for blur scratch buffer");
+		memcpy(dest, src, width * height * sizeof(*dest));
 		return;
 	}
 	blur_once(dest, src, scratch, width, height, radius * scale);

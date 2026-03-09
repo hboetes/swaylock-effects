@@ -369,6 +369,10 @@ cairo_surface_t *load_background_image(const char *path) {
 
 cairo_surface_t *scale_background_image(cairo_surface_t *image,
 		enum background_mode mode, int buffer_width, int buffer_height) {
+	if (image == NULL) {
+		return NULL;
+	}
+
 	cairo_surface_t *target = cairo_image_surface_create(CAIRO_FORMAT_RGB24, buffer_width, buffer_height);
 	cairo_t *cairo = cairo_create(target);
 	double width = cairo_image_surface_get_width(image);
@@ -444,6 +448,10 @@ cairo_surface_t *scale_background_image(cairo_surface_t *image,
 }
 
 void render_background_image(cairo_t *cairo, cairo_surface_t *image, double alpha) {
+	if (image == NULL) {
+		return;
+	}
+
 	cairo_save(cairo);
 	cairo_set_source_surface(cairo, image, 0, 0);
 	cairo_paint_with_alpha(cairo, alpha);

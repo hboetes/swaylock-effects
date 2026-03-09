@@ -45,7 +45,14 @@ cairo_surface_t *cairo_surface_duplicate(cairo_surface_t *src) {
 	}
 	memcpy(new_data, cairo_image_surface_get_data(src), stride * height);
 
-	return cairo_image_surface_create_for_data(new_data, format, width, height, stride);
+	cairo_surface_t *surface = cairo_image_surface_create_for_data(
+			new_data, format, width, height, stride);
+	if (cairo_surface_status(surface) != CAIRO_STATUS_SUCCESS) {
+		free(new_data);
+		return NULL;
+	}
+
+	return surface;
 }
 
 #if HAVE_GDK_PIXBUF

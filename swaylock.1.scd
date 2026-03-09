@@ -81,9 +81,10 @@ Locks your Wayland session.
 	The date format for the indicator clock. Defaults to '%a, %x'.
 
 *-i, --image* [[<output>]:]<path>
-	Display the given image, optionally only on the given output. Use -c to set
-	a background color. If the path potentially contains a ':', prefix it with another
-	':' to prevent interpreting part of it as <output>.
+	Display the given image, optionally only on the given output. If _path_ names
+	a directory, a random image file from it will be used. Use -c to set a
+	background color. If the path potentially contains a ':', prefix it with
+	another ':' to prevent interpreting part of it as <output>.
 
 *-S, --screenshots*
 	Display a screenshot.

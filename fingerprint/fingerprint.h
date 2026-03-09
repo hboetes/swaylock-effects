@@ -28,6 +28,7 @@ struct FingerprintState {
 	gboolean completed;
 	gboolean match;
 	int active; /* always 1 unless --fingerprint-on-demand; set by ESC/C-u */
+	bool on_demand;
 
 	char status[128];
 
