@@ -132,6 +132,7 @@ struct swaylock_surface {
 		uint32_t format, width, height, stride;
 		enum wl_output_transform transform;
 		void *data;
+		struct wl_buffer *buffer;
 		cairo_surface_t *original_image;
 		cairo_surface_t *scaled_image;
 		struct swaylock_image *image;
@@ -160,7 +161,7 @@ struct swaylock_surface {
 	struct wl_list link;
 };
 
-// There is exactly one swaylock_image for each -i argument
+// Background images configured from the CLI or captured from screencopy
 struct swaylock_image {
 	char *path;
 	char *output_name;

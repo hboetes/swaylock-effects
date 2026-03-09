@@ -33,7 +33,7 @@ static int handle_conversation(int num_msg, const struct pam_message **msg,
 		swaylock_log(LOG_ERROR, "Allocation failed");
 		return PAM_ABORT;
 	}
-	*resp = pam_reply;
+
 	for (int i = 0; i < num_msg; ++i) {
 		switch (msg[i]->msg_style) {
 		case PAM_PROMPT_ECHO_OFF:
@@ -41,7 +41,7 @@ static int handle_conversation(int num_msg, const struct pam_message **msg,
 			pam_reply[i].resp = strdup(pw_buf); // PAM clears and frees this
 			if (pam_reply[i].resp == NULL) {
 				swaylock_log(LOG_ERROR, "Allocation failed");
-				return PAM_ABORT;
+				goto error;
 			}
 			break;
 		case PAM_ERROR_MSG:
@@ -49,7 +49,17 @@ static int handle_conversation(int num_msg, const struct pam_message **msg,
 			break;
 		}
 	}
+
+	*resp = pam_reply;
 	return PAM_SUCCESS;
+
+error:
+	for (int i = 0; i < num_msg; ++i) {
+		free(pam_reply[i].resp);
+	}
+	free(pam_reply);
+	*resp = NULL;
+	return PAM_ABORT;
 }
 
 static const char *get_pam_auth_error(int pam_status) {

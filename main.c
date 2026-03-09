@@ -247,25 +247,150 @@ static void daemonize_done(void *fdptr) {
 	*fd = -1;
 }
 
+static int sigusr_fds[2] = {-1, -1};
+
+static void destroy_image(struct swaylock_image *image) {
+	if (image == NULL) {
+		return;
+	}
+	if (image->link.prev != NULL && image->link.next != NULL) {
+		wl_list_remove(&image->link);
+	}
+	if (image->cairo_surface != NULL) {
+		cairo_surface_destroy(image->cairo_surface);
+	}
+	free(image->output_name);
+	free(image->path);
+	free(image);
+}
+
+static void destroy_screencopy_buffer(struct swaylock_surface *surface) {
+	if (surface->screencopy_frame != NULL) {
+		zwlr_screencopy_frame_v1_destroy(surface->screencopy_frame);
+		surface->screencopy_frame = NULL;
+	}
+	if (surface->screencopy.buffer != NULL) {
+		wl_buffer_destroy(surface->screencopy.buffer);
+		surface->screencopy.buffer = NULL;
+	}
+	if (surface->screencopy.data != NULL) {
+		munmap(surface->screencopy.data,
+				surface->screencopy.stride * surface->screencopy.height);
+		surface->screencopy.data = NULL;
+	}
+}
+
+static void fail_screencopy(struct swaylock_surface *surface, const char *message) {
+	swaylock_log(LOG_ERROR, "%s", message);
+	surface->state->args.screenshots = false;
+	surface->state->args.fade_in = 0; // Fade in is not possible without screenshot
+	destroy_screencopy_buffer(surface);
+	destroy_image(surface->screencopy.image);
+	surface->screencopy.image = NULL;
+	--surface->events_pending;
+}
+
 static void destroy_surface(struct swaylock_surface *surface) {
 	swaylock_log(LOG_DEBUG, "Destroy surface for output %s", surface->output_name);
 
 	wl_list_remove(&surface->link);
+	destroy_screencopy_buffer(surface);
 	if (surface->layer_surface != NULL) {
 		zwlr_layer_surface_v1_destroy(surface->layer_surface);
 	}
 	if (surface->ext_session_lock_surface_v1 != NULL) {
 		ext_session_lock_surface_v1_destroy(surface->ext_session_lock_surface_v1);
 	}
+	if (surface->subsurface != NULL) {
+		wl_subsurface_destroy(surface->subsurface);
+	}
+	if (surface->child != NULL) {
+		wl_surface_destroy(surface->child);
+	}
 	if (surface->surface != NULL) {
 		wl_surface_destroy(surface->surface);
 	}
+	if (surface->scaled_image != NULL) {
+		cairo_surface_destroy(surface->scaled_image);
+	}
+	if (surface->screencopy.scaled_image != NULL) {
+		cairo_surface_destroy(surface->screencopy.scaled_image);
+	}
+	if (surface->screencopy.original_image != NULL) {
+		cairo_surface_destroy(surface->screencopy.original_image);
+	}
+	destroy_image(surface->screencopy.image);
 	destroy_buffer(&surface->buffers[0]);
 	destroy_buffer(&surface->buffers[1]);
 	destroy_buffer(&surface->indicator_buffers[0]);
 	destroy_buffer(&surface->indicator_buffers[1]);
 	wl_output_destroy(surface->output);
+	free(surface->output_name);
 	free(surface);
+}
+
+static void destroy_effects(struct swaylock_effect *effects, int count) {
+	if (effects == NULL) {
+		return;
+	}
+	for (int i = 0; i < count; ++i) {
+		if (effects[i].tag == EFFECT_COMPOSE) {
+			free(effects[i].e.compose.imgpath);
+		}
+	}
+	free(effects);
+}
+
+static void destroy_args(struct swaylock_args *args) {
+	destroy_effects(args->effects, args->effects_count);
+	free(args->font);
+	free(args->timestr);
+	free(args->datestr);
+	free(args->text_cleared);
+	free(args->text_caps_lock);
+	free(args->text_verifying);
+	free(args->text_wrong);
+}
+
+static void destroy_state_resources(struct swaylock_state *state) {
+	struct swaylock_surface *surface, *next_surface;
+	wl_list_for_each_safe(surface, next_surface, &state->surfaces, link) {
+		destroy_surface(surface);
+	}
+	struct swaylock_image *image, *next_image;
+	wl_list_for_each_safe(image, next_image, &state->images, link) {
+		destroy_image(image);
+	}
+	if (state->indicator_image != NULL) {
+		cairo_surface_destroy(state->indicator_image);
+	}
+	if (state->password.buffer != NULL) {
+		password_buffer_destroy(state->password.buffer, state->password.buffer_len);
+	}
+	if (state->xkb.state != NULL) {
+		xkb_state_unref(state->xkb.state);
+	}
+	if (state->xkb.keymap != NULL) {
+		xkb_keymap_unref(state->xkb.keymap);
+	}
+	if (state->xkb.context != NULL) {
+		xkb_context_unref(state->xkb.context);
+	}
+	if (state->eventloop != NULL) {
+		loop_destroy(state->eventloop);
+	}
+	if (state->display != NULL) {
+		wl_display_disconnect(state->display);
+	}
+	if (sigusr_fds[0] >= 0) {
+		close(sigusr_fds[0]);
+		sigusr_fds[0] = -1;
+	}
+	if (sigusr_fds[1] >= 0) {
+		close(sigusr_fds[1]);
+		sigusr_fds[1] = -1;
+	}
+	destroy_args(&state->args);
 }
 
 static const struct zwlr_layer_surface_v1_listener layer_surface_listener;
@@ -536,13 +661,26 @@ static void handle_screencopy_frame_buffer(void *data,
 	struct swaylock_surface *surface = data;
 
 	struct swaylock_image *image = calloc(1, sizeof(struct swaylock_image));
+	if (image == NULL) {
+		fail_screencopy(surface, "Failed to allocate screenshot image");
+		return;
+	}
+	wl_list_init(&image->link);
 	image->path = NULL;
-	image->output_name = surface->output_name;
+	if (surface->output_name != NULL) {
+		image->output_name = strdup(surface->output_name);
+		if (image->output_name == NULL) {
+			destroy_image(image);
+			fail_screencopy(surface, "Failed to allocate screenshot output name");
+			return;
+		}
+	}
 
 	void *bufdata;
 	struct wl_buffer *buf = create_shm_buffer(surface->state->shm, format, width, height, stride, &bufdata);
 	if (buf == NULL) {
-		free(image);
+		destroy_image(image);
+		fail_screencopy(surface, "Failed to allocate screenshot buffer");
 		return;
 	}
 
@@ -550,9 +688,9 @@ static void handle_screencopy_frame_buffer(void *data,
 	surface->screencopy.width = width;
 	surface->screencopy.height = height;
 	surface->screencopy.stride = stride;
-
 	surface->screencopy.image = image;
 	surface->screencopy.data = bufdata;
+	surface->screencopy.buffer = buf;
 
 	zwlr_screencopy_frame_v1_copy(frame, buf);
 }
@@ -624,11 +762,13 @@ static void handle_screencopy_frame_ready(void *data,
 			surface->screencopy.height,
 			surface->screencopy.stride,
 			surface->screencopy.transform);
+	destroy_screencopy_buffer(surface);
 	if (image == NULL) {
 		swaylock_log(LOG_ERROR, "Failed to create image from screenshot");
 		state->args.screenshots = false;
 		state->args.fade_in = 0; // Fade in is not possible without screenshot
-		disable_surface_fade(surface);
+		destroy_image(surface->screencopy.image);
+		surface->screencopy.image = NULL;
 	} else  {
 		surface->screencopy.original_image = cairo_surface_duplicate(image);
 		if (!surface->screencopy.original_image) {
@@ -641,6 +781,9 @@ static void handle_screencopy_frame_ready(void *data,
 		if (state->args.screenshots) {
 			swaylock_log(LOG_DEBUG, "Loaded screenshot for output %s", surface->output_name);
 			wl_list_insert(&state->images, &surface->screencopy.image->link);
+		} else {
+			destroy_image(surface->screencopy.image);
+			surface->screencopy.image = NULL;
 		}
 	}
 
@@ -651,12 +794,7 @@ static void handle_screencopy_frame_failed(void *data,
 		struct zwlr_screencopy_frame_v1 *frame) {
 	swaylock_trace();
 	struct swaylock_surface *surface = data;
-	swaylock_log(LOG_ERROR, "Screencopy failed");
-	surface->state->args.screenshots = false;
-	surface->state->args.fade_in = 0; // Fade in is not possible without screenshot
-	disable_surface_fade(surface);
-
-	--surface->events_pending;
+	fail_screencopy(surface, "Screencopy failed");
 }
 
 static const struct zwlr_screencopy_frame_v1_listener screencopy_frame_listener = {
@@ -793,8 +931,6 @@ static const struct wl_registry_listener registry_listener = {
 	.global_remove = handle_global_remove,
 };
 
-static int sigusr_fds[2] = {-1, -1};
-
 void do_sigusr(int sig) {
 	(void)write(sigusr_fds[1], "1", 1);
 }
@@ -815,13 +951,16 @@ static cairo_surface_t *select_image(struct swaylock_state *state,
 
 static char *join_args(char **argv, int argc) {
 	assert(argc > 0);
-	int len = 0, i;
-	for (i = 0; i < argc; ++i) {
+	size_t len = 0;
+	for (int i = 0; i < argc; ++i) {
 		len += strlen(argv[i]) + 1;
 	}
 	char *res = malloc(len);
+	if (res == NULL) {
+		return NULL;
+	}
 	len = 0;
-	for (i = 0; i < argc; ++i) {
+	for (int i = 0; i < argc; ++i) {
 		strcpy(res + len, argv[i]);
 		len += strlen(argv[i]);
 		res[len++] = ' ';
@@ -876,8 +1015,7 @@ static char *choose_random_image(const char *directory) {
 				continue;
 			}
 			if (i == selected_file) {
-				char *path = malloc(strlen(path_buffer)+1);
-				strcpy(path, path_buffer);
+				char *path = strdup(path_buffer);
 				closedir(dir);
 				return path;
 			}
@@ -891,17 +1029,29 @@ static char *choose_random_image(const char *directory) {
 static void load_image(char *arg, struct swaylock_state *state) {
 	// [[<output>]:]<path>
 	struct swaylock_image *image = calloc(1, sizeof(struct swaylock_image));
+	if (image == NULL) {
+		swaylock_log(LOG_ERROR, "Failed to allocate image configuration");
+		return;
+	}
+	wl_list_init(&image->link);
+
 	char *separator = strchr(arg, ':');
 	if (separator) {
 		*separator = '\0';
 		image->output_name = separator == arg ? NULL : strdup(arg);
+		*separator = ':';
 		image->path = strdup(separator + 1);
 	} else {
-		image->output_name = NULL;
 		image->path = strdup(arg);
 	}
 
+	if ((separator != NULL && separator != arg && image->output_name == NULL) || image->path == NULL) {
+		swaylock_log(LOG_ERROR, "Failed to allocate image path");
+		goto error;
+	}
+
 	struct swaylock_image *iter_image, *temp;
+	struct swaylock_image *replaced_image = NULL;
 	wl_list_for_each_safe(iter_image, temp, &state->images, link) {
 		if (lenient_strcmp(iter_image->output_name, image->output_name) == 0) {
 			if (image->output_name) {
@@ -912,11 +1062,7 @@ static void load_image(char *arg, struct swaylock_state *state) {
 				swaylock_log(LOG_DEBUG, "Replacing default image with %s",
 						image->path);
 			}
-			wl_list_remove(&iter_image->link);
-			free(iter_image->cairo_surface);
-			free(iter_image->output_name);
-			free(iter_image->path);
-			free(iter_image);
+			replaced_image = iter_image;
 			break;
 		}
 	}
@@ -926,19 +1072,35 @@ static void load_image(char *arg, struct swaylock_state *state) {
 	// expansions performed
 	wordexp_t p;
 	while (strstr(image->path, "  ")) {
-		image->path = realloc(image->path, strlen(image->path) + 2);
+		char *path = realloc(image->path, strlen(image->path) + 2);
+		if (path == NULL) {
+			swaylock_log(LOG_ERROR, "Failed to expand image path");
+			goto error;
+		}
+		image->path = path;
 		char *ptr = strstr(image->path, "  ") + 1;
 		memmove(ptr + 1, ptr, strlen(ptr) + 1);
 		*ptr = '\\';
 	}
 	if (wordexp(image->path, &p, 0) == 0) {
-		free(image->path);
-		image->path = join_args(p.we_wordv, p.we_wordc);
+		bool have_words = p.we_wordc > 0;
+		char *path = NULL;
+		if (have_words) {
+			path = join_args(p.we_wordv, p.we_wordc);
+		}
 		wordfree(&p);
+		if (have_words) {
+			if (path == NULL) {
+				swaylock_log(LOG_ERROR, "Failed to expand image path");
+				goto error;
+			}
+			free(image->path);
+			image->path = path;
+		}
 	}
 
 	// If path is pointing to a directory, choose random image from it.
-	char* path = choose_random_image(image->path);
+	char *path = choose_random_image(image->path);
 	if (path != NULL) {
 		free(image->path);
 		image->path = path;
@@ -947,13 +1109,20 @@ static void load_image(char *arg, struct swaylock_state *state) {
 	// Load the actual image
 	image->cairo_surface = load_background_image(image->path);
 	if (!image->cairo_surface) {
-		free(image);
-		return;
+		goto error;
+	}
+
+	if (replaced_image != NULL) {
+		destroy_image(replaced_image);
 	}
 
 	wl_list_insert(&state->images, &image->link);
 	swaylock_log(LOG_DEBUG, "Loaded image %s for output %s", image->path,
 			image->output_name ? image->output_name : "*");
+	return;
+
+error:
+	destroy_image(image);
 }
 
 static void set_default_colors(struct swaylock_colors *colors) {
@@ -1955,13 +2124,16 @@ int main(int argc, char **argv) {
 		.text_wrong = strdup("Wrong"),
 	};
 	wl_list_init(&state.images);
+	wl_list_init(&state.surfaces);
 	set_default_colors(&state.args.colors);
 
 	char *config_path = NULL;
 	int result = parse_options(argc, argv, NULL, NULL, &config_path);
+	int exit_code = 0;
 	if (result != 0) {
 		free(config_path);
-		return result;
+		exit_code = result;
+		goto cleanup;
 	}
 	if (!config_path) {
 		config_path = get_config_path();
@@ -1972,8 +2144,8 @@ int main(int argc, char **argv) {
 		int config_status = load_config(config_path, &state, &line_mode);
 		free(config_path);
 		if (config_status != 0) {
-			free(state.args.font);
-			return config_status;
+			exit_code = config_status;
+			goto cleanup;
 		}
 	}
 
@@ -1981,8 +2153,8 @@ int main(int argc, char **argv) {
 		swaylock_log(LOG_DEBUG, "Parsing CLI Args");
 		int result = parse_options(argc, argv, &state, &line_mode, NULL);
 		if (result != 0) {
-			free(state.args.font);
-			return result;
+			exit_code = result;
+			goto cleanup;
 		}
 	}
 
@@ -2000,23 +2172,24 @@ int main(int argc, char **argv) {
 	state.password.buffer_len = 1024;
 	state.password.buffer = password_buffer_create(state.password.buffer_len);
 	if (!state.password.buffer) {
-		return EXIT_FAILURE;
+		exit_code = EXIT_FAILURE;
+		goto cleanup;
 	}
 
 	if (pipe(sigusr_fds) != 0) {
 		swaylock_log(LOG_ERROR, "Failed to pipe");
-		return 1;
+		exit_code = 1;
+		goto cleanup;
 	}
 
-	wl_list_init(&state.surfaces);
 	state.xkb.context = xkb_context_new(XKB_CONTEXT_NO_FLAGS);
 	state.display = wl_display_connect(NULL);
 	if (!state.display) {
-		free(state.args.font);
 		swaylock_log(LOG_ERROR, "Unable to connect to the compositor. "
 				"If your compositor is running, check or set the "
 				"WAYLAND_DISPLAY environment variable.");
-		return EXIT_FAILURE;
+		exit_code = EXIT_FAILURE;
+		goto cleanup;
 	}
 
 	struct wl_registry *registry = wl_display_get_registry(state.display);
@@ -2025,17 +2198,20 @@ int main(int argc, char **argv) {
 
 	if (!state.compositor) {
 		swaylock_log(LOG_ERROR, "Missing wl_compositor");
-		return 1;
+		exit_code = 1;
+		goto cleanup;
 	}
 
 	if (!state.subcompositor) {
 		swaylock_log(LOG_ERROR, "Missing wl_subcompositor");
-		return 1;
+		exit_code = 1;
+		goto cleanup;
 	}
 
 	if (!state.shm) {
 		swaylock_log(LOG_ERROR, "Missing wl_shm");
-		return 1;
+		exit_code = 1;
+		goto cleanup;
 	}
 
 	struct swaylock_surface *surface;
@@ -2078,17 +2254,19 @@ int main(int argc, char **argv) {
 	} else {
 		swaylock_log(LOG_ERROR, "Missing ext-session-lock-v1, wlr-layer-shell "
 				"and wlr-input-inhibitor");
-		return 1;
+		exit_code = 1;
+		goto cleanup;
 	}
 
 	if (wl_display_roundtrip(state.display) == -1) {
-		free(state.args.font);
 		if (state.input_inhibit_manager) {
 			swaylock_log(LOG_ERROR, "Exiting - failed to inhibit input:"
 					" is another lockscreen already running?");
-			return 2;
+			exit_code = 2;
+		} else {
+			exit_code = 1;
 		}
-		return 1;
+		goto cleanup;
 	}
 
 	wl_list_for_each(surface, &state.surfaces, link) {
@@ -2166,6 +2344,9 @@ int main(int argc, char **argv) {
 	}
 #endif
 
-	free(state.args.font);
-	return 0;
+	goto cleanup;
+
+cleanup:
+	destroy_state_resources(&state);
+	return exit_code;
 }
