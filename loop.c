@@ -67,7 +67,7 @@ void loop_poll(struct loop *loop) {
 	int ms = INT_MAX;
 	if (!wl_list_empty(&loop->timers)) {
 		struct timespec now;
-		clock_gettime(CLOCK_MONOTONIC, &now);
+		clock_gettime(CLOCK_BOOTTIME, &now);
 		struct loop_timer *timer = NULL;
 		wl_list_for_each(timer, &loop->timers, link) {
 			int timer_ms = (timer->expiry.tv_sec - now.tv_sec) * 1000;
@@ -106,7 +106,7 @@ void loop_poll(struct loop *loop) {
 	// Dispatch timers
 	if (!wl_list_empty(&loop->timers)) {
 		struct timespec now;
-		clock_gettime(CLOCK_MONOTONIC, &now);
+		clock_gettime(CLOCK_BOOTTIME, &now);
 		struct loop_timer *timer = NULL, *tmp_timer = NULL;
 		wl_list_for_each_safe(timer, tmp_timer, &loop->timers, link) {
 			if (timer->removed) {
@@ -165,7 +165,7 @@ struct loop_timer *loop_add_timer(struct loop *loop, int ms,
 	timer->callback = callback;
 	timer->data = data;
 
-	clock_gettime(CLOCK_MONOTONIC, &timer->expiry);
+	clock_gettime(CLOCK_BOOTTIME, &timer->expiry);
 	timer->expiry.tv_sec += ms / 1000;
 
 	long int nsec = (ms % 1000) * 1000000;
