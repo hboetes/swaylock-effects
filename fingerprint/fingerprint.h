@@ -32,6 +32,9 @@ struct FingerprintState {
 
 	char status[128];
 
+	int64_t retry_after; /* monotonic ms, 0 = retry immediately */
+	guint sleep_subscription_id; /* logind PrepareForSleep subscription */
+
 	FprintDBusManager *manager;
 	GDBusConnection *connection;
 	FprintDBusDevice *device;
