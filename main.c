@@ -11,6 +11,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/file.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <dirent.h>
@@ -2082,6 +2083,48 @@ void log_init(int argc, char **argv) {
 }
 
 int main(int argc, char **argv) {
+	// Single-instance guard.
+	//
+	// Hold a non-blocking flock() on a fixed per-user lock file for the
+	// lifetime of the process; the kernel releases it on exit, so stale locks
+	// are impossible. A second instance that finds the lock held exits
+	// immediately, before it can reach fingerprint_init() and race the first
+	// instance for the fingerprint device.
+	//
+	// The lock file lives in XDG_RUNTIME_DIR, which is already per-user and
+	// mode 0700. If it is unset we simply skip the guard: swaylock is a
+	// Wayland client and cannot reach the compositor without XDG_RUNTIME_DIR
+	// anyway, so there is nothing to lock and nothing to guard.
+	//
+	// Only a genuinely-held lock (EWOULDBLOCK) causes an exit; any failure to
+	// *set up* the guard just warns and continues, so a guard problem can
+	// never keep the screen from locking.
+	{
+		const char *xdg = getenv("XDG_RUNTIME_DIR");
+		char lockpath[PATH_MAX];
+		if (xdg && xdg[0] && snprintf(lockpath, sizeof(lockpath),
+				"%s/swaylock.lock", xdg) < (int)sizeof(lockpath)) {
+			int lockfd = open(lockpath,
+					O_RDWR | O_CREAT | O_NOFOLLOW | O_CLOEXEC, 0600);
+			if (lockfd < 0) {
+				fprintf(stderr, "swaylock: cannot open lock file %s: %s. "
+						"Locking the screen WITHOUT single-instance "
+						"protection.\n", lockpath, strerror(errno));
+			} else if (flock(lockfd, LOCK_EX | LOCK_NB) == 0) {
+				// Lock acquired. lockfd is deliberately left open for the
+				// lifetime of the process; the kernel drops it on exit.
+			} else if (errno == EWOULDBLOCK) {
+				fprintf(stderr, "swaylock: already running\n");
+				return 1;
+			} else {
+				fprintf(stderr, "swaylock: cannot lock %s: %s. Locking the "
+						"screen WITHOUT single-instance protection.\n",
+						lockpath, strerror(errno));
+				close(lockfd);
+			}
+		}
+	}
+
 	log_init(argc, argv);
 	initialize_pw_backend(argc, argv);
 	srand(time(NULL));
