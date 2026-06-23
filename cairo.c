@@ -33,6 +33,20 @@ cairo_subpixel_order_t to_cairo_subpixel_order(enum wl_output_subpixel subpixel)
 }
 
 cairo_surface_t *cairo_surface_duplicate(cairo_surface_t *src) {
+	// On resume, a screenshot capture can hand back a surface in an error
+	// state -- non-NULL, but with no backing pixel data (get_data() == NULL).
+	// Copying from it would memcpy() from a NULL source and SIGSEGV, which
+	// tears down the locker and unlocks the session. Bail out instead; the
+	// caller already treats a NULL return as "no image" and disables the
+	// fade-in gracefully.
+	if (src == NULL || cairo_surface_status(src) != CAIRO_STATUS_SUCCESS) {
+		return NULL;
+	}
+	unsigned char *src_data = cairo_image_surface_get_data(src);
+	if (src_data == NULL) {
+		return NULL;
+	}
+
 	uint32_t stride = cairo_image_surface_get_stride(src);
 	uint32_t height = cairo_image_surface_get_height(src);
 	uint32_t width = cairo_image_surface_get_width(src);
@@ -43,7 +57,7 @@ cairo_surface_t *cairo_surface_duplicate(cairo_surface_t *src) {
 		fprintf(stderr, "swaylock: Unable to allocate memory for surface duplication\n");
 		return NULL;
 	}
-	memcpy(new_data, cairo_image_surface_get_data(src), stride * height);
+	memcpy(new_data, src_data, stride * height);
 
 	cairo_surface_t *surface = cairo_image_surface_create_for_data(
 			new_data, format, width, height, stride);
