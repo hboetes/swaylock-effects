@@ -1223,6 +1223,7 @@ static int parse_options(int argc, char **argv, struct swaylock_state *state,
 		LO_EFFECT_COMPOSE,
 		LO_INDICATOR,
 		LO_CLOCK,
+		LO_BATTERY,
 		LO_TIMESTR,
 		LO_DATESTR,
 		LO_FADE_IN,
@@ -1305,6 +1306,7 @@ static int parse_options(int argc, char **argv, struct swaylock_state *state,
 		{"effect-compose", required_argument, NULL, LO_EFFECT_COMPOSE},
 		{"indicator", no_argument, NULL, LO_INDICATOR},
 		{"clock", no_argument, NULL, LO_CLOCK},
+		{"battery", no_argument, NULL, LO_BATTERY},
 		{"timestr", required_argument, NULL, LO_TIMESTR},
 		{"datestr", required_argument, NULL, LO_DATESTR},
 		{"fade-in", required_argument, NULL, LO_FADE_IN},
@@ -1376,6 +1378,8 @@ static int parse_options(int argc, char **argv, struct swaylock_state *state,
 			"Always show the indicator.\n"
 		"  --clock                          "
 			"Show time and date.\n"
+		"  --battery                        "
+                        "Show battery state and charge level.\n"
 		"  --timestr <format>               "
 			"The format string for the time. Defaults to '%T'.\n"
 		"  --datestr <format>               "
@@ -1870,6 +1874,11 @@ static int parse_options(int argc, char **argv, struct swaylock_state *state,
 				state->args.clock = true;
 			}
 			break;
+		case LO_BATTERY:
+			if (state) {
+				state->args.battery = true;
+			}
+			break;
 		case LO_TIMESTR:
 			if (state) {
 				free(state->args.timestr);
@@ -2163,6 +2172,7 @@ int main(int argc, char **argv) {
 		.effects_count = 0,
 		.indicator = false,
 		.clock = false,
+		.battery = false,
 		.timestr = strdup("%T"),
 		.datestr = strdup("%a, %x"),
 		.allow_fade = true,

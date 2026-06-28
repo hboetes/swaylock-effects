@@ -73,6 +73,7 @@ struct swaylock_args {
 	int effects_count;
 	bool indicator;
 	bool clock;
+	bool battery;
 	char *timestr;
 	char *datestr;
 	uint32_t fade_in;
