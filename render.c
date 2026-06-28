@@ -6,6 +6,8 @@
 #include "cairo.h"
 #include "background-image.h"
 #include "swaylock.h"
+#include <stdio.h>
+#include <string.h>
 
 // glib might or might not have already defined MIN,
 // depending on whether we have pixbuf or not...
@@ -16,6 +18,16 @@
 #define M_PI 3.14159265358979323846
 const float TYPE_INDICATOR_RANGE = M_PI / 3.0f;
 const float TYPE_INDICATOR_BORDER_THICKNESS = M_PI / 128.0f;
+
+// Icons for battery states
+static const char *battery_icons_charging[11] = {
+    	"󱐋󰂎", "󱐋󰁺", "󱐋󰁻", "󱐋󰁼", "󱐋󰁼", "󱐋󰁾",
+    	"󰁿󱐋", "󱐋󰂀", "󱐋󰂁", "󱐋󰂂", "󱐋󰁹",
+};
+static const char *battery_icons_discharging[11] = {
+    	"󰂎", "󰁺", "󰁻", "󰁼", "󰁼", "󰁾",
+    	"󰁿", "󰂀", "󰂁", "󰂂", "󰁹",
+};
 
 static void set_color_for_state(cairo_t *cairo, struct swaylock_state *state,
 		struct swaylock_colorset *colorset) {
@@ -136,6 +148,49 @@ void render_background_fade(struct swaylock_surface *surface, uint32_t time) {
 
 	render_frame_background(surface, true);
 	render_frame(surface);
+}
+
+// battery path to read
+static void battery_text(char *line1, size_t line1_len) {
+  	FILE *f;
+  	int cap = -1;
+  	char status[32] = {0};
+
+  	f = fopen("/sys/class/power_supply/BAT0/capacity", "r");
+  	if (f) {
+    		if (fscanf(f, "%d", &cap) != 1) {
+      			cap = -1;
+    		}
+    		fclose(f);
+  	}
+
+  	f = fopen("/sys/class/power_supply/BAT0/status", "r");
+  	if (f) {
+    		if (fscanf(f, "%31s", status) != 1) {
+      			status[0] = '\0';
+    		}
+    		fclose(f);
+  	}
+
+  	if (cap < 0) {
+    		snprintf(line1, line1_len, "<NF_BATT>  --%%");
+    		return;
+  	}
+
+  	int idx = cap / 10;
+  	if (idx < 0)
+    		idx = 0;
+  	if (idx > 10)
+    		idx = 10;
+
+  	const char *icon;
+  	if (status[0] != '\0' && strstr(status, "Charging")) {
+    		icon = battery_icons_charging[idx];
+  	} else {
+    		icon = battery_icons_discharging[idx];
+  	}
+
+  	snprintf(line1, line1_len, "%s  %d%%", icon, cap);
 }
 
 void render_frame(struct swaylock_surface *surface) {
@@ -382,6 +437,33 @@ void render_frame(struct swaylock_surface *surface) {
 
 			cairo_set_font_size(cairo, font_size);
 		}
+
+		// Battery
+		if (state->args.battery) {
+			char batt_line[64];
+
+      			battery_text(batt_line, sizeof(batt_line));
+
+      			cairo_set_font_size(cairo, arc_radius / 10.0f);
+
+      			cairo_text_extents_t ext;
+      			cairo_font_extents_t fe;
+
+      			cairo_text_extents(cairo, batt_line, &ext);
+      			cairo_font_extents(cairo, &fe);
+
+      			double x = (buffer_width / 2) - (ext.width / 2 + ext.x_bearing);
+
+      			double y = (buffer_diameter / 2) + arc_radius / 1.5f;
+
+      			cairo_move_to(cairo, x, y);
+      			cairo_show_text(cairo, batt_line);
+      			cairo_new_sub_path(cairo);
+
+      			if (new_width < ext.width)
+        			new_width = ext.width;
+    		}
+
 
 		// Typing indicator: Highlight random part on keypress
 		if (state->auth_state == AUTH_STATE_INPUT
